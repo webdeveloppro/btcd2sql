@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/btcsuite/btcd/blockchain"
+	"github.com/vladyslav2/db2sql"
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/database"
@@ -36,6 +37,7 @@ func main() {
 		log.Fatalf("Failed to connect to postgres: %v", err)
 	}
 	defer pg.Close()
+	pg.SetMaxOpenConns(80)
 
 	cfg := blockchain.Config{
 		DB:          db,
@@ -43,11 +45,11 @@ func main() {
 		TimeSource:  blockchain.NewMedianTime(),
 	}
 
-	bc2sql, err := New(&cfg, pg)
+	bc2sql, err := db2sql.New(&cfg, pg)
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = bc2sql.Parse()
+	bc2sql.Parse()
 	if err != nil {
 		log.Fatal(err)
 	}

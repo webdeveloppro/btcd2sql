@@ -1,4 +1,4 @@
-package main
+package db2sql
 
 import (
 	"database/sql"
@@ -40,6 +40,7 @@ func GetInputAddress(pubKeyHex string) (string, error) {
 	return base58.Encode(res), nil
 }
 
+// FindPrevAddress looks for a blockchain address from previous hash function
 func FindPrevAddress(pg *sql.DB, hash string, offset uint32) (string, error) {
 
 	var PkScript string
@@ -49,7 +50,7 @@ func FindPrevAddress(pg *sql.DB, hash string, offset uint32) (string, error) {
 		WHERE hash = $1 limit 1 offset $2`
 
 	if err := pg.QueryRow(sql, hash, offset).Scan(&PkScript); err != nil {
-		return "", errors.Wrap(err, "utils: Cannot get address from txout")
+		return "", errors.Wrapf(err, "utils: Cannot get pk_script from txout for hash %s", hash)
 	}
 
 	dst := make([]byte, hex.DecodedLen(len(PkScript)))

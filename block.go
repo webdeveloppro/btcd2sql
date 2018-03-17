@@ -1,4 +1,4 @@
-package main
+package db2sql
 
 import (
 	"database/sql"
@@ -8,6 +8,11 @@ import (
 	"github.com/pkg/errors"
 )
 
+type Block interface {
+	Insert() error
+	InsertTransactions() error
+}
+
 // Block2SQL structure for holding Block information
 type Block2SQL struct {
 	ID           int
@@ -16,20 +21,23 @@ type Block2SQL struct {
 	pg           *sql.DB
 }
 
+// NewBlock Block2SQL struct constructor
+func NewBlock(block *btcutil.Block, pg *sql.DB) *Block2SQL {
+	blk := Block2SQL{
+		Block: block,
+		pg:    pg,
+	}
+	blk.Transactions = make(map[string]int)
+	return &blk
+}
+
 // Insert Will transfer blockchain block to SQL block table. Will not touch blockchain transactions data
 func (B2SQL *Block2SQL) Insert() error {
-
-	/*
-		if B2SQL.ID != 0 {
-			return fmt.Errorf("Btcd2sql already have block id: %d, cannot do insert for a second time", B2SQL.ID)
-		}
-	*/
 
 	if B2SQL.Block.Hash().String() == "" {
 		return fmt.Errorf("Btcd2sql have empty hash, nothing to insert")
 	}
 
-	fmt.Println(B2SQL.Block.Height())
 	if err := B2SQL.pg.QueryRow(`
 		INSERT INTO block
 			(bits, height, nonce, version, hash_prev_block, hash_merkle_root, created_at, hash)
@@ -70,20 +78,28 @@ func (B2SQL *Block2SQL) InsertTransactions() error {
 		tranHash := tran.Hash().String()
 		tranID := 0
 
-		if err := B2SQL.pg.QueryRow(`
-				INSERT INTO transaction
-					(hash, block_id, has_witness)
-				VALUES
-					(
-						$1,
-						$2,
-						$3
-					)
-					RETURNING id`,
+		sql := `
+		INSERT INTO transaction
+			(hash, block_id, has_witness)
+		VALUES
+			(
+				$1,
+				$2,
+				$3
+			)
+			RETURNING id`
+
+		if err := B2SQL.pg.QueryRow(sql,
 			tranHash,
 			B2SQL.ID,
 			tran.HasWitness(),
 		).Scan(&tranID); err != nil {
+			if err.Error() == "pq: duplicate key value violates unique constraint \"transaction_hash_key\"" {
+				// https://bitcoin.stackexchange.com/questions/71918/why-does-transaction-d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d
+				continue
+			}
+
+			fmt.Println(sql, tranHash, B2SQL.ID, tran.HasWitness())
 			return errors.Wrap(err, "insert transaction failed")
 		}
 		B2SQL.Transactions[tranHash] = tranID

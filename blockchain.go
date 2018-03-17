@@ -1,6 +1,8 @@
-package main
+package db2sql
 
 import (
+	"log"
+
 	"github.com/btcsuite/btcd/blockchain"
 
 	"database/sql"
@@ -30,43 +32,29 @@ func New(cfg *blockchain.Config, pg *sql.DB) (Blockchain2SQL, error) {
 	return b2q, nil
 }
 
-func (BC2SQL *Blockchain2SQL) init() error {
+// Parse will transfer leveldb blockchain data to SQL
+func (BC2SQL *Blockchain2SQL) Parse() {
+
 	var n int32
 	BC2SQL.Block2sql = make([]Block2SQL, 0, 0)
+
 	// beststate := BC2SQL.Blockchain.BestSnapshot()
-	for n = 0; n < 56000; n++ {
+	for n = 135743; n < 268641; n++ {
 		blk, err := BC2SQL.Blockchain.BlockByHeight(n)
+
 		if err != nil {
-			return errors.Wrapf(err, "Cannot create block by height %d", n)
+			// return errors.Wrapf(err, "Cannot get block by height %d", n)
+			log.Fatalf("Cannot get block by height %d", n)
 		}
-		b2sql := Block2SQL{
-			Block: blk,
-			pg:    BC2SQL.pg,
+
+		b2sql := NewBlock(blk, BC2SQL.pg)
+
+		if err := b2sql.Insert(); err != nil {
+			log.Fatal(err)
 		}
-		b2sql.Transactions = make(map[string]int)
 
-		BC2SQL.Block2sql = append(BC2SQL.Block2sql, b2sql)
-	}
-	return nil
-}
-
-// Parse will transfer leveldb blockchain data to SQL
-func (BC2SQL *Blockchain2SQL) Parse() error {
-
-	err := BC2SQL.init()
-	if err != nil {
-		return err
-	}
-
-	for _, b2sql := range BC2SQL.Block2sql {
-		err := b2sql.Insert()
-		if err != nil {
-			return err
-		}
-		err = b2sql.InsertTransactions()
-		if err != nil {
-			return err
+		if err := b2sql.InsertTransactions(); err != nil {
+			log.Fatal(err)
 		}
 	}
-	return nil
 }

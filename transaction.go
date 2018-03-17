@@ -1,10 +1,11 @@
-package main
+package db2sql
 
 import (
 	"encoding/hex"
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
@@ -30,12 +31,17 @@ func (B2SQL *Block2SQL) insertTxIN(txIn *wire.TxIn, tranID int) error {
 		if len(disbufArr) > 1 {
 			address, err = GetInputAddress(disbufArr[1])
 			if err != nil {
-				return errors.Wrap(err, "Cannot get txin address")
+				return errors.Wrap(err, "transaction: Cannot get txin address")
 			}
 		} else {
 			address, err = FindPrevAddress(B2SQL.pg, txIn.PreviousOutPoint.Hash.String(), txIn.PreviousOutPoint.Index)
 			if err != nil {
-				log.Fatal("Find tr error", err)
+				time.Sleep(5 * time.Second)
+
+				address, err = FindPrevAddress(B2SQL.pg, txIn.PreviousOutPoint.Hash.String(), txIn.PreviousOutPoint.Index)
+				if err != nil {
+					return errors.Wrap(err, "transactions: can't find previous output address")
+				}
 			}
 		}
 
@@ -69,7 +75,7 @@ func (B2SQL *Block2SQL) insertTxIN(txIn *wire.TxIn, tranID int) error {
 			txIn.SerializeSize(),
 			disbuf,
 		); err != nil {
-			return errors.Wrap(err, "insert txin failed")
+			return errors.Wrap(err, "transaction: insert txin failed")
 		}
 
 		if _, err = B2SQL.pg.Exec(`
