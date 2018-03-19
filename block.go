@@ -1,6 +1,7 @@
 package db2sql
 
 import (
+	"github.com/btcsuite/btcd/wire"
 	"database/sql"
 	"fmt"
 
@@ -38,6 +39,7 @@ func (B2SQL *Block2SQL) Insert() error {
 		return fmt.Errorf("Btcd2sql have empty hash, nothing to insert")
 	}
 
+	fmt.Printf("Started: %d\n", B2SQL.Block.Height())
 	if err := B2SQL.pg.QueryRow(`
 		INSERT INTO block
 			(bits, height, nonce, version, hash_prev_block, hash_merkle_root, created_at, hash)
@@ -78,6 +80,15 @@ func (B2SQL *Block2SQL) InsertTransactions() error {
 		tranHash := tran.Hash().String()
 		tranID := 0
 
+		// Gather all TxIn Information
+		txSQL := ""
+		for _, txIn := range ins {
+			txSQL = fmt.Sprintf("%s,%s", txSQL, txIn2JSONB(txIn))
+			if err != nil {
+				return err
+			}
+		}
+
 		sql := `
 		INSERT INTO transaction
 			(hash, block_id, has_witness)
@@ -106,13 +117,6 @@ func (B2SQL *Block2SQL) InsertTransactions() error {
 
 		// fmt.Printf("Transaction: %s\n Input:", tranHash)
 
-		for _, txIn := range ins {
-			err := B2SQL.insertTxIN(txIn, B2SQL.Transactions[tranHash])
-			if err != nil {
-				return err
-			}
-		}
-
 		for _, txOut := range outs {
 			err := B2SQL.insertTxOUT(txOut, B2SQL.Transactions[tranHash])
 			if err != nil {
@@ -120,5 +124,62 @@ func (B2SQL *Block2SQL) InsertTransactions() error {
 			}
 		}
 	}
+
+	fmt.Printf("Ended: %d\n", B2SQL.Block.Height())
 	return nil
+}
+
+func txIn2JSONB(txIn *wire.TxIn, address_id int) string {
+  
+	// Get previous address hash if that exists
+	if txIn.PreviousOutPoint.Hash.String() != "0000000000000000000000000000000000000000000000000000000000000000" {
+		// spew.Dump(txIn)
+		disbuf, err := txscript.DisasmString(txIn.SignatureScript)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		disbufArr := strings.Split(disbuf, " ")
+		// spew.Dump(disbuf, txIn.PreviousOutPoint)
+
+		if len(disbufArr) > 1 {
+			address, err = GetInputAddress(disbufArr[1])
+			if err != nil {
+				return errors.Wrap(err, "transaction: Cannot get txin address")
+			}
+		} else {
+			address, err = FindPrevAddress(B2SQL.pg, txIn.PreviousOutPoint.Hash.String(), txIn.PreviousOutPoint.Index)
+
+			if err != nil {
+				// dirty hack for weired transactions
+				// like 9969603dca74d14d29d1d5f56b94c7872551607f8c2d6837ab9715c60721b50e
+				if err == sql.ErrNoRows {
+					address = fmt.Sprintf("nonstandard-%s", disbuf)
+				} else {
+					return err
+				}
+			}
+		}
+
+		if err = B2SQL.pg.QueryRow(`
+			SELECT id, ballance 
+			FROM address 
+			WHERE hash = $1`,
+			address,
+		).Scan(&addressID, &ballance); err != nil {
+			return errors.Wrap(err, fmt.Sprintf("cant find address %s", address))
+		}
+	}
+
+	return fmt.Sprintf(`{
+		"address_id": %d, 
+		"amount": %d,
+		"prev_out": %s,
+		"size": %d,
+		"signature_script": %s,
+		"sequence": %d,
+		"witness": %s}`, 
+		address_id,
+		txIn.amount
+	)
+
 }

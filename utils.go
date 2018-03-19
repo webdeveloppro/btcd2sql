@@ -50,7 +50,7 @@ func FindPrevAddress(pg *sql.DB, hash string, offset uint32) (string, error) {
 		WHERE hash = $1 limit 1 offset $2`
 
 	if err := pg.QueryRow(sql, hash, offset).Scan(&PkScript); err != nil {
-		return "", errors.Wrapf(err, "utils: Cannot get pk_script from txout for hash %s", hash)
+		return "", err
 	}
 
 	dst := make([]byte, hex.DecodedLen(len(PkScript)))

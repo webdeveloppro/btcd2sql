@@ -1,16 +1,17 @@
 package db2sql
 
 import (
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/pkg/errors"
+	"golang.org/x/crypto/ripemd160"
 )
 
 // InsertTxIN parse incoming transactions and update database txin and address tables
@@ -35,12 +36,14 @@ func (B2SQL *Block2SQL) insertTxIN(txIn *wire.TxIn, tranID int) error {
 			}
 		} else {
 			address, err = FindPrevAddress(B2SQL.pg, txIn.PreviousOutPoint.Hash.String(), txIn.PreviousOutPoint.Index)
-			if err != nil {
-				time.Sleep(5 * time.Second)
 
-				address, err = FindPrevAddress(B2SQL.pg, txIn.PreviousOutPoint.Hash.String(), txIn.PreviousOutPoint.Index)
-				if err != nil {
-					return errors.Wrap(err, "transactions: can't find previous output address")
+			if err != nil {
+				// dirty hack for weired transactions
+				// like 9969603dca74d14d29d1d5f56b94c7872551607f8c2d6837ab9715c60721b50e
+				if err == sql.ErrNoRows {
+					address = fmt.Sprintf("nonstandard-%s", disbuf)
+				} else {
+					return err
 				}
 			}
 		}
@@ -95,54 +98,59 @@ func (B2SQL *Block2SQL) insertTxIN(txIn *wire.TxIn, tranID int) error {
 // InsertTxOUT parse outcoming transactions and update database txout and address tables
 func (B2SQL *Block2SQL) insertTxOUT(txOut *wire.TxOut, tranID int) error {
 	pkScriptHex := hex.EncodeToString(txOut.PkScript)
-	_, addresses, _, err := txscript.ExtractPkScriptAddrs(
+	typ, addresses, _, err := txscript.ExtractPkScriptAddrs(
 		txOut.PkScript, &chaincfg.MainNetParams)
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("Cannot extract pkScript %s", pkScriptHex))
 	}
 
-	addrs := ""
-	for _, a := range addresses {
-		addrs = fmt.Sprint(addrs, a.EncodeAddress(), ",")
-
-		addressID := 0
-		if err = B2SQL.pg.QueryRow(`
-						INSERT INTO address
-							(hash, income, ballance)
-						VALUES
-							(
-								$1,
-								$2,
-								$3
-							) ON CONFLICT (hash) DO UPDATE SET 
-							  income = address.income + $2,
-							  ballance = address.ballance + $3
-							  RETURNING ID`,
-			a.EncodeAddress(),
-			txOut.Value,
-			txOut.Value,
-		).Scan(&addressID); err != nil {
-			return errors.Wrap(err, "insert or update address failed")
+	// dirty hack for weired transactions
+	// like 9969603dca74d14d29d1d5f56b94c7872551607f8c2d6837ab9715c60721b50e
+	if typ.String() == "nonstandard" {
+		rp := ripemd160.New()
+		_, err = rp.Write([]byte(pkScriptHex))
+		if err != nil {
+			return err
 		}
+		bcipher := rp.Sum(nil)
+		log.Printf("Nonstandard txout, transaction_id %d", tranID)
+		B2SQL.insertAddressTxOUT(txOut, tranID, pkScriptHex, string(bcipher))
+	}
 
-		if _, err = B2SQL.pg.Exec(`
-						INSERT INTO txout
-							(transaction_id, address_id, val, pk_script)
-						VALUES
-							(
-								$1,
-								$2,
-								$3,
-								$4
-							)`,
-			tranID,
-			addressID,
-			txOut.Value,
-			pkScriptHex,
-		); err != nil {
-			return errors.Wrap(err, fmt.Sprintf("insert txout failed: %d, %d, %d, %s", tranID, addressID, txOut.Value, pkScriptHex))
+	for _, a := range addresses {
+		err = B2SQL.insertAddressTxOUT(txOut, tranID, pkScriptHex, a.EncodeAddress())
+		if err != nil {
+			return err
 		}
 	}
-	// fmt.Printf("\t class: %s, to: %s amount: %f \n", cls, addrs, float64(txOut.Value)/100000000)
+	return nil
+}
+
+func (B2SQL *Block2SQL) insertAddressTxOUT(txOut *wire.TxOut, tranID int, pkScriptHex, address string) error {
+	addressID := 0
+	if err := B2SQL.pg.QueryRow(`
+		INSERT INTO address (hash, income, ballance)
+		VALUES ($1, $2, $3) 
+		ON CONFLICT (hash) DO UPDATE SET 
+		income = address.income + $2,
+		ballance = address.ballance + $3
+		RETURNING ID`,
+		address,
+		txOut.Value,
+		txOut.Value,
+	).Scan(&addressID); err != nil {
+		return errors.Wrap(err, "insert or update address failed")
+	}
+
+	if _, err := B2SQL.pg.Exec(`
+		INSERT INTO txout (transaction_id, address_id, val, pk_script)
+		VALUES ($1, $2,	$3, $4)`,
+		tranID,
+		addressID,
+		txOut.Value,
+		pkScriptHex,
+	); err != nil {
+		return errors.Wrap(err, fmt.Sprintf("insert txout failed: %d, %d, %d, %s", tranID, addressID, txOut.Value, pkScriptHex))
+	}
 	return nil
 }

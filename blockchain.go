@@ -1,6 +1,7 @@
 package db2sql
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/btcsuite/btcd/blockchain"
@@ -38,8 +39,11 @@ func (BC2SQL *Blockchain2SQL) Parse() {
 	var n int32
 	BC2SQL.Block2sql = make([]Block2SQL, 0, 0)
 
+	b := BC2SQL.Blockchain.BestSnapshot()
+	fmt.Printf("best height: %d", b.Height)
+
 	// beststate := BC2SQL.Blockchain.BestSnapshot()
-	for n = 135743; n < 268641; n++ {
+	for n = 154012; n < 1068641; n++ {
 		blk, err := BC2SQL.Blockchain.BlockByHeight(n)
 
 		if err != nil {
