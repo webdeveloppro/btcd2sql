@@ -4,38 +4,30 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/vladyslav2/bitcoin2sql/pkg/block"
-
 	"github.com/vladyslav2/bitcoin2sql/pkg/address"
+	"github.com/vladyslav2/bitcoin2sql/pkg/block"
 
 	"github.com/btcsuite/btcd/blockchain"
 
 	"database/sql"
 )
 
-// App structure will be responsible for step by step process of migration
-type App struct {
-	addrStorage address.Storage
-}
-
-// New create App object
-func New(storage address.Storage) *App {
-	return &App{
-		addrStorage: storage,
-	}
-}
+// AddrStorage address storage
+var AddrStorage map[string]*address.Address
 
 // Parse will transfer leveldb blockchain data to SQL
-func (a *App) Parse(bc *blockchain.BlockChain, pg *sql.DB) {
+func Parse(bc *blockchain.BlockChain, pg *sql.DB) {
 
 	rows, err := pg.Query("SELECT id, hash, ballance, income, outcome from address")
 	if err != nil {
 		log.Fatalf("Cannot read data from addresses, %v", err)
 	}
 
-	Addresses = make(map[string]*address.Address, 0)
+	AddrStorage = make(map[string]*address.Address, 1000000)
+
+	AddPgStorage := address.NewStorage(pg)
 	for rows.Next() {
-		a := address.Address{}
+		a := address.New(&AddPgStorage)
 		if err := rows.Scan(
 			&a.ID,
 			&a.Hash,
@@ -45,7 +37,7 @@ func (a *App) Parse(bc *blockchain.BlockChain, pg *sql.DB) {
 		); err != nil {
 			log.Fatalf("cannot read address query, %v", err)
 		}
-		Addresses[a.Hash] = &a
+		AddrStorage[a.Hash] = a
 	}
 
 	b := bc.BestSnapshot()

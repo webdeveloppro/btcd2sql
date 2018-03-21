@@ -37,7 +37,7 @@ func NewBlock(storage Storage, block *block.Block) *Block2SQL {
 func (blk *Block2SQL) ConvertBTCD2SQL(BTCBlock *btcutil.Block) ([]string, error) {
 
 	if BTCBlock.Hash().String() == "" {
-		return fmt.Errorf("Btcd2sql have empty hash, nothing to insert")
+		return []string{}, fmt.Errorf("Btcd2sql have empty hash, nothing to insert")
 	}
 
 	blk.Block.Hash = BTCBlock.Hash().String()
@@ -88,7 +88,7 @@ func (blk *Block2SQL) ConvertTransactions(transactions []*btcutil.Tx) ([]string,
 			}
 			t.TxOuts = append(t.TxOuts, *txOutStruct)
 			for _, a := range txOutStruct.Addresses {
-				addressesIds = append(addressesIds, Addresses[a].ID)
+				addressesIds = append(addressesIds, AddrStorage[a].ID)
 				addressesHash = append(addressesHash, a)
 				// Log address changes
 				// addressesQ = append("insert into address_log(AddressID, Amount, TransactionID, Block.TimeStamp)")
@@ -103,49 +103,6 @@ func (blk *Block2SQL) ConvertTransactions(transactions []*btcutil.Tx) ([]string,
 		*/
 	}
 	return addressesHash, nil
-}
-
-// FindPrevAddress looks for a blockchain address from previous hash function
-func (blk *Block2SQL) FindPrevAddress(hash string, index uint32) (string, error) {
-
-	PkScript, err := blk.storage.GetPKScript(hash, index)
-	if err != nil {
-		return "", errors.Wrapf(err, "Utils: Cannot find txout.pk_script for trasn: %s, index: %d", hash, index)
-	}
-
-	dst := make([]byte, hex.DecodedLen(len(PkScript)))
-	if _, err := hex.Decode(dst, []byte(PkScript)); err != nil {
-		return "", errors.Wrap(err, "Utils: Cannot convert hex string to bytes")
-	}
-
-	typ, addresses, _, err := txscript.ExtractPkScriptAddrs(dst, &chaincfg.MainNetParams)
-	if err != nil {
-		return "", errors.Wrap(err, fmt.Sprintf("Cannot extract pkScript %s", PkScript))
-	}
-
-	if typ == txscript.NonStandardTy {
-		badaddress := string(PkScript)
-
-		if len(badaddress) > 22 {
-			badaddress = badaddress[0:22]
-		}
-
-		return fmt.Sprintf("nonstandard-%s", badaddress), nil
-	}
-
-	return addresses[0].EncodeAddress(), nil
-}
-
-// Insert Block data to database
-func (blk *Block2SQL) Insert(affectedAddresses) error {
-	err := blk.Block.Insert()
-	if err != nil {
-		return err
-	}
-
-	for _, hash := range affectedAddresses {
-		Addresses[hash].Save()
-	}
 }
 
 func (blk *Block2SQL) txin2struct(txIn *wire.TxIn) (*transaction.TxIn, error) {
@@ -191,8 +148,8 @@ func (blk *Block2SQL) txin2struct(txIn *wire.TxIn) (*transaction.TxIn, error) {
 		}
 
 		txStruct.Address = addressHash
-		txStruct.AddressID = Addresses[addressHash].ID
-		txStruct.Amount = Addresses[addressHash].Ballance
+		txStruct.AddressID = AddrStorage[addressHash].ID
+		txStruct.Amount = AddrStorage[addressHash].Ballance
 		txStruct.PrevOut = txIn.PreviousOutPoint.Hash.String()
 		txStruct.SignatureScript = disbuf
 		txStruct.Sequence = txIn.Sequence
@@ -201,13 +158,54 @@ func (blk *Block2SQL) txin2struct(txIn *wire.TxIn) (*transaction.TxIn, error) {
 		// Add witness
 		// txStruct.Witness = txIn.Witness
 
-		Addresses[addressHash].Income -= Addresses[addressHash].Ballance
-		Addresses[addressHash].Outcome += Addresses[addressHash].Ballance
-		Addresses[addressHash].Ballance = 0
+		AddrStorage[addressHash].Income -= AddrStorage[addressHash].Ballance
+		AddrStorage[addressHash].Outcome += AddrStorage[addressHash].Ballance
+		AddrStorage[addressHash].Ballance = 0
 
 		return txStruct, nil
 	}
 	return nil, nil
+}
+
+// FindPrevAddress looks for a blockchain address from previous hash function
+func (blk *Block2SQL) FindPrevAddress(hash string, index uint32) (string, error) {
+
+	// ToDo
+	// Addresses[0] - seems like a wrong assumption
+
+	// Check if transaction is in current block
+	for _, t := range blk.Block.Transactions {
+		if t.Hash == hash {
+			return t.TxOuts[index].Addresses[0], nil
+		}
+	}
+
+	PkScript, err := blk.storage.GetPKScript(hash, index)
+	if err != nil {
+		return "", errors.Wrapf(err, "Utils: Cannot find txout.pk_script for trasn: %s, index: %d", hash, index)
+	}
+
+	dst := make([]byte, hex.DecodedLen(len(PkScript)))
+	if _, err := hex.Decode(dst, []byte(PkScript)); err != nil {
+		return "", errors.Wrap(err, "Utils: Cannot convert hex string to bytes")
+	}
+
+	typ, addresses, _, err := txscript.ExtractPkScriptAddrs(dst, &chaincfg.MainNetParams)
+	if err != nil {
+		return "", errors.Wrap(err, fmt.Sprintf("Cannot extract pkScript %s", PkScript))
+	}
+
+	if typ == txscript.NonStandardTy {
+		badaddress := string(PkScript)
+
+		if len(badaddress) > 22 {
+			badaddress = badaddress[0:22]
+		}
+
+		return fmt.Sprintf("nonstandard-%s", badaddress), nil
+	}
+
+	return addresses[0].EncodeAddress(), nil
 }
 
 func (blk *Block2SQL) txout2struct(txOut *wire.TxOut) (*transaction.TxOut, error) {
@@ -226,25 +224,45 @@ func (blk *Block2SQL) txout2struct(txOut *wire.TxOut) (*transaction.TxOut, error
 		if err := blk.checkAddressHash(addressHash); err != nil {
 			return txStruct, errors.Wrap(err, fmt.Sprintf("block: cant find address %s", addressHash))
 		}
-		Addresses[addressHash].Income += txStruct.Value
-		Addresses[addressHash].Ballance = txStruct.Value
+
+		// ToDo:
+		// https://blockchain.info/block/00000000689051c09ff2cd091cc4c22c10b965eb8db3ad5f032621cc36626175
+		// if person move bitcoin to him self - do not update outcome
+		AddrStorage[addressHash].Income += txStruct.Value
+		AddrStorage[addressHash].Ballance = txStruct.Value
 	}
 	return txStruct, nil
 }
 
 func (blk *Block2SQL) checkAddressHash(hash string) error {
-	if _, ok := Addresses[hash]; ok == false {
+	if _, ok := AddrStorage[hash]; ok == false {
 		addr, err := blk.storage.GetAddressByHash(hash)
 		switch err {
 		case sql.ErrNoRows:
-			if er := addr.Insert(); er != nil {
+			if er := addr.Save(); er != nil {
 				return errors.Wrap(err, fmt.Sprintf("checkaddress: cant create new address %s", hash))
 			}
 		case nil:
 		default:
 			return errors.Wrap(err, fmt.Sprintf("checkaddress: cant find address %s", hash))
 		}
-		Addresses[hash] = addr
+		AddrStorage[hash] = addr
+	}
+	return nil
+}
+
+// Insert Block data to database
+func (blk *Block2SQL) Insert(affectedAddresses []string) error {
+	err := blk.Block.Insert()
+	if err != nil {
+		return err
+	}
+
+	for _, hash := range affectedAddresses {
+		err := AddrStorage[hash].Save()
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
