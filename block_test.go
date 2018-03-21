@@ -20,6 +20,6 @@ func TestInsert(t *testing.T) {
 		WillReturnError(fmt.Errorf("some error"))
 }
 
-func TestInsertTransactions(t *testing.T) {
+func TestConvert(t *testing.T) {
 
 }

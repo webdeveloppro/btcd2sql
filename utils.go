@@ -1,15 +1,10 @@
 package db2sql
 
 import (
-	"database/sql"
 	"encoding/hex"
-	"fmt"
 
-	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcutil/base58"
-	"github.com/pkg/errors"
 	"golang.org/x/crypto/ripemd160"
 )
 
@@ -38,31 +33,4 @@ func GetInputAddress(pubKeyHex string) (string, error) {
 	// append data with last 4 bytes of sha256^2(data)
 	res := append(bcipher[:], chainhash.DoubleHashB(bcipher)[:4]...)
 	return base58.Encode(res), nil
-}
-
-// FindPrevAddress looks for a blockchain address from previous hash function
-func FindPrevAddress(pg *sql.DB, hash string, offset uint32) (string, error) {
-
-	var PkScript string
-	sql := `SELECT
-		tx.pk_script
-		FROM transaction as t JOIN txout as tx ON t.id = tx.transaction_id
-		WHERE hash = $1 limit 1 offset $2`
-
-	if err := pg.QueryRow(sql, hash, offset).Scan(&PkScript); err != nil {
-		return "", err
-	}
-
-	dst := make([]byte, hex.DecodedLen(len(PkScript)))
-	_, err := hex.Decode(dst, []byte(PkScript))
-	if err != nil {
-		return "", errors.Wrap(err, "block: Cannot convert hex string to bytes")
-	}
-
-	_, addresses, _, err := txscript.ExtractPkScriptAddrs(dst, &chaincfg.MainNetParams)
-	if err != nil {
-		return "", errors.Wrap(err, fmt.Sprintf("Cannot extract pkScript %s", PkScript))
-	}
-
-	return addresses[0].EncodeAddress(), nil
 }

@@ -45,12 +45,10 @@ func main() {
 		TimeSource:  blockchain.NewMedianTime(),
 	}
 
-	bc2sql, err := db2sql.New(&cfg, pg)
+	bc, err := blockchain.New(&cfg)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("cannot create blockchain %v", err)
 	}
-	bc2sql.Parse()
-	if err != nil {
-		log.Fatal(err)
-	}
+
+	db2sql.Parse(bc, pg)
 }

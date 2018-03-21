@@ -1,5 +1,6 @@
 package db2sql
 
+/*
 import (
 	"database/sql"
 	"encoding/hex"
@@ -49,8 +50,8 @@ func (B2SQL *Block2SQL) insertTxIN(txIn *wire.TxIn, tranID int) error {
 		}
 
 		if err = B2SQL.pg.QueryRow(`
-			SELECT id, ballance 
-			FROM address 
+			SELECT id, ballance
+			FROM address
 			WHERE hash = $1`,
 			address,
 		).Scan(&addressID, &ballance); err != nil {
@@ -82,8 +83,8 @@ func (B2SQL *Block2SQL) insertTxIN(txIn *wire.TxIn, tranID int) error {
 		}
 
 		if _, err = B2SQL.pg.Exec(`
-						UPDATE address 
-						SET ballance = 0, outcome = outcome - $1 
+						UPDATE address
+						SET ballance = 0, outcome = outcome - $1
 						WHERE id = $2`,
 			ballance,
 			addressID,
@@ -130,8 +131,8 @@ func (B2SQL *Block2SQL) insertAddressTxOUT(txOut *wire.TxOut, tranID int, pkScri
 	addressID := 0
 	if err := B2SQL.pg.QueryRow(`
 		INSERT INTO address (hash, income, ballance)
-		VALUES ($1, $2, $3) 
-		ON CONFLICT (hash) DO UPDATE SET 
+		VALUES ($1, $2, $3)
+		ON CONFLICT (hash) DO UPDATE SET
 		income = address.income + $2,
 		ballance = address.ballance + $3
 		RETURNING ID`,
@@ -154,3 +155,4 @@ func (B2SQL *Block2SQL) insertAddressTxOUT(txOut *wire.TxOut, tranID int, pkScri
 	}
 	return nil
 }
+*/
