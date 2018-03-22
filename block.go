@@ -62,7 +62,7 @@ func (blk *Block2SQL) ConvertTransactions(transactions []*btcutil.Tx) ([]string,
 
 		ins := tran.MsgTx().TxIn
 		outs := tran.MsgTx().TxOut
-		addressesIds := make([]int, 0)
+		addressesIds := make([]uint, 0)
 
 		// Gather all TxIn Information
 		for _, txIn := range ins {
@@ -109,12 +109,35 @@ func (blk *Block2SQL) txin2struct(txIn *wire.TxIn) (*transaction.TxIn, error) {
 
 	// Get previous address hash if that exists
 	if txIn.PreviousOutPoint.Hash.String() != "0000000000000000000000000000000000000000000000000000000000000000" {
+
 		txStruct := &transaction.TxIn{}
 		addressHash := ""
+
 		disbuf, err := txscript.DisasmString(txIn.SignatureScript)
 		if err != nil {
 			return txStruct, errors.Wrap(err, "txin2json: Cannot get txin address")
 		}
+
+		// maybe we can get value without looking for prev output?
+		txout, err := blk.FindPrevTxOut(txIn.PreviousOutPoint.Hash.String(), txIn.PreviousOutPoint.Index)
+		if err != nil {
+			// return txStruct, errors.Wrap(err, "txin2struct: Cannot find previous hash")
+			// dirty hack for weired transactions
+			// like 9969603dca74d14d29d1d5f56b94c7872551607f8c2d6837ab9715c60721b50e
+
+			if err == sql.ErrNoRows {
+				badaddress := disbuf
+				if len(badaddress) > 22 {
+					badaddress = badaddress[0:22]
+				}
+				txout.Addresses = make([]string, 1)
+				txout.Addresses[0] = fmt.Sprintf("nonstandard-%s", badaddress)
+				addressHash = txout.Addresses[0]
+			} else {
+				return txStruct, errors.Wrap(err, "txin2struct: Cannot find previous hash")
+			}
+		}
+
 		disbufArr := strings.Split(disbuf, " ")
 		txStruct.SignatureScript = disbuf
 
@@ -122,24 +145,6 @@ func (blk *Block2SQL) txin2struct(txIn *wire.TxIn) (*transaction.TxIn, error) {
 			addressHash, err = GetInputAddress(disbufArr[1])
 			if err != nil {
 				return txStruct, errors.Wrap(err, "txin2json: Cannot get txin address")
-			}
-		} else {
-			addressHash, err = blk.FindPrevAddress(txIn.PreviousOutPoint.Hash.String(), txIn.PreviousOutPoint.Index)
-
-			if err != nil {
-				// return txStruct, errors.Wrap(err, "txin2struct: Cannot find previous hash")
-				// dirty hack for weired transactions
-				// like 9969603dca74d14d29d1d5f56b94c7872551607f8c2d6837ab9715c60721b50e
-
-				if err == sql.ErrNoRows {
-					badaddress := disbuf
-					if len(badaddress) > 22 {
-						badaddress = badaddress[0:22]
-					}
-					addressHash = fmt.Sprintf("nonstandard-%s", badaddress)
-				} else {
-					return txStruct, errors.Wrap(err, "txin2struct: Cannot find previous hash")
-				}
 			}
 		}
 
@@ -158,6 +163,9 @@ func (blk *Block2SQL) txin2struct(txIn *wire.TxIn) (*transaction.TxIn, error) {
 		// Add witness
 		// txStruct.Witness = txIn.Witness
 
+		// ToDo
+		// Thats not right - you can send half of your money
+		// have to get value from transaction
 		AddrStorage[addressHash].Income -= AddrStorage[addressHash].Ballance
 		AddrStorage[addressHash].Outcome += AddrStorage[addressHash].Ballance
 		AddrStorage[addressHash].Ballance = 0
@@ -167,8 +175,8 @@ func (blk *Block2SQL) txin2struct(txIn *wire.TxIn) (*transaction.TxIn, error) {
 	return nil, nil
 }
 
-// FindPrevAddress looks for a blockchain address from previous hash function
-func (blk *Block2SQL) FindPrevAddress(hash string, index uint32) (string, error) {
+// FindPrevTxOut looks for a blockchain address from previous hash function
+func (blk *Block2SQL) FindPrevTxOut(hash string, index uint32) (*transaction.TxOut, error) {
 
 	// ToDo
 	// Addresses[0] - seems like a wrong assumption
@@ -176,36 +184,44 @@ func (blk *Block2SQL) FindPrevAddress(hash string, index uint32) (string, error)
 	// Check if transaction is in current block
 	for _, t := range blk.Block.Transactions {
 		if t.Hash == hash {
-			return t.TxOuts[index].Addresses[0], nil
+			return &t.TxOuts[index], nil
 		}
 	}
 
-	PkScript, err := blk.storage.GetPKScript(hash, index)
+	txout, err := blk.storage.GetTxOutByIndex(hash, index)
 	if err != nil {
-		return "", errors.Wrapf(err, "Utils: Cannot find txout.pk_script for trasn: %s, index: %d", hash, index)
+		return &transaction.TxOut{}, errors.Wrapf(err, "Utils: Cannot find txout.pk_script for trasn: %s, index: %d", hash, index)
 	}
 
-	dst := make([]byte, hex.DecodedLen(len(PkScript)))
-	if _, err := hex.Decode(dst, []byte(PkScript)); err != nil {
-		return "", errors.Wrap(err, "Utils: Cannot convert hex string to bytes")
+	dst := make([]byte, hex.DecodedLen(len(txout.PkScript)))
+	if _, err := hex.Decode(dst, []byte(txout.PkScript)); err != nil {
+		return txout, errors.Wrap(err, "Utils: Cannot convert hex string to bytes")
 	}
 
 	typ, addresses, _, err := txscript.ExtractPkScriptAddrs(dst, &chaincfg.MainNetParams)
 	if err != nil {
-		return "", errors.Wrap(err, fmt.Sprintf("Cannot extract pkScript %s", PkScript))
+		return txout, errors.Wrap(err, fmt.Sprintf("Cannot extract pkScript %s", txout.PkScript))
 	}
 
 	if typ == txscript.NonStandardTy {
-		badaddress := string(PkScript)
+		badaddress := string(txout.PkScript)
 
 		if len(badaddress) > 22 {
 			badaddress = badaddress[0:22]
 		}
+		txout.Addresses = make([]string, 1)
+		txout.Addresses[0] = fmt.Sprintf("nonstandard-%s", badaddress)
 
-		return fmt.Sprintf("nonstandard-%s", badaddress), nil
+		return txout, nil
 	}
 
-	return addresses[0].EncodeAddress(), nil
+	txout.Addresses = make([]string, len(addresses))
+
+	for i, a := range addresses {
+		txout.Addresses[i] = a.EncodeAddress()
+	}
+
+	return txout, nil
 }
 
 func (blk *Block2SQL) txout2struct(txOut *wire.TxOut) (*transaction.TxOut, error) {

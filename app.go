@@ -4,19 +4,18 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/jackc/pgx"
 	"github.com/vladyslav2/bitcoin2sql/pkg/address"
 	"github.com/vladyslav2/bitcoin2sql/pkg/block"
 
 	"github.com/btcsuite/btcd/blockchain"
-
-	"database/sql"
 )
 
 // AddrStorage address storage
 var AddrStorage map[string]*address.Address
 
 // Parse will transfer leveldb blockchain data to SQL
-func Parse(bc *blockchain.BlockChain, pg *sql.DB) {
+func Parse(bc *blockchain.BlockChain, pg *pgx.ConnPool) {
 
 	rows, err := pg.Query("SELECT id, hash, ballance, income, outcome from address")
 	if err != nil {
@@ -26,6 +25,7 @@ func Parse(bc *blockchain.BlockChain, pg *sql.DB) {
 	AddrStorage = make(map[string]*address.Address, 1000000)
 
 	AddPgStorage := address.NewStorage(pg)
+
 	for rows.Next() {
 		a := address.New(&AddPgStorage)
 		if err := rows.Scan(

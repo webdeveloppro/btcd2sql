@@ -1,12 +1,11 @@
 package main
 
 import (
-	"database/sql"
-	"fmt"
 	"log"
 	"os"
 
 	"github.com/btcsuite/btcd/blockchain"
+	"github.com/jackc/pgx"
 	"github.com/vladyslav2/db2sql"
 
 	"github.com/btcsuite/btcd/chaincfg"
@@ -20,10 +19,42 @@ import (
 var chainParams = &chaincfg.MainNetParams
 
 func main() {
-	dbinfo := fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable",
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_USERNAME"),
-		os.Getenv("DB_NAME"))
+	host := os.Getenv("DB_HOST")
+	user := os.Getenv("DB_USERNAME")
+	dbpassword := os.Getenv("DB_PASSWORD")
+	dbname := os.Getenv("DB_NAME")
+
+	if host == "" {
+		log.Print("Empty host string, setup DB_HOST env")
+		host = "localhost"
+	}
+
+	if user == "" {
+		log.Fatal("Empty user string, setup DB_USER env")
+		return
+	}
+
+	if dbname == "" {
+		log.Fatal("Empty dbname string, setup DB_DBNAME env")
+		return
+	}
+
+	connPoolConfig := pgx.ConnPoolConfig{
+		ConnConfig: pgx.ConnConfig{
+			Host:     host,
+			User:     user,
+			Password: dbpassword,
+			Database: dbname,
+		},
+		MaxConnections: 100,
+	}
+
+	pg, err := pgx.NewConnPool(connPoolConfig)
+	if err != nil {
+		log.Fatalf("Unable to create connection pool %v", err)
+	}
+	defer pg.Close()
+
 	db, err := database.Open("ffldb", os.Getenv("BTCD_DATADIR"), wire.MainNet)
 
 	if err != nil {
@@ -31,13 +62,6 @@ func main() {
 		// Handle error
 	}
 	defer db.Close()
-
-	pg, err := sql.Open("postgres", dbinfo)
-	if err != nil {
-		log.Fatalf("Failed to connect to postgres: %v", err)
-	}
-	defer pg.Close()
-	pg.SetMaxOpenConns(80)
 
 	cfg := blockchain.Config{
 		DB:          db,

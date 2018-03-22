@@ -3,5 +3,5 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/lib/jvm/default/bin:/us
 export DB_USERNAME=postgres
 export DB_HOST=127.0.0.1
 export DB_PASSWORD=
-export DB_NAME=bitcoin_v3
+export DB_NAME=bitcoin
 export BTCD_DATADIR=/mnt/golang_bitcoin/.btcd/data/mainnet/blocks_ffldb

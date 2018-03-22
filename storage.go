@@ -1,9 +1,9 @@
 package db2sql
 
 import (
-	"database/sql"
 	"fmt"
 
+	"github.com/jackc/pgx"
 	"github.com/vladyslav2/bitcoin2sql/pkg/transaction"
 
 	"github.com/pkg/errors"
@@ -12,35 +12,35 @@ import (
 
 // Storage general interface
 type Storage interface {
-	GetPKScript(hash string, index uint32) (string, error)
+	GetTxOutByIndex(hash string, index uint32) (*transaction.TxOut, error)
 	GetAddressByHash(string) (*address.Address, error)
 	getTransaction() *transaction.Transaction
 }
 
 // PGStorage postgresql storage
 type PGStorage struct {
-	con *sql.DB
+	con *pgx.ConnPool
 }
 
 // NewStorage will create new postgresql storage
-func NewStorage(con *sql.DB) *PGStorage {
+func NewStorage(con *pgx.ConnPool) *PGStorage {
 	return &PGStorage{
 		con: con,
 	}
 }
 
-// GetPKScript looks for a pk script in txout jsonb
-func (pg *PGStorage) GetPKScript(hash string, index uint32) (string, error) {
+// GetTxOutByIndex looks for a txout by transaction hash and index position
+func (pg *PGStorage) GetTxOutByIndex(hash string, index uint32) (*transaction.TxOut, error) {
 
-	var PkScript string
+	txout := &transaction.TxOut{}
 	sql := fmt.Sprintf(`SELECT 
-		txout::json#>>'{%d,pk_script}' FROM transaction 
-		WHERE hash = $1`, index)
+		txout::json#>>'{%d,pk_script}', txout::json#>>'{%d,val}' FROM transaction 
+		WHERE hash = $1`, index, index)
 
-	if err := pg.con.QueryRow(sql, hash).Scan(&PkScript); err != nil {
-		return PkScript, errors.Wrapf(err, "Storage: Cannot query: %v", err)
+	if err := pg.con.QueryRow(sql, hash).Scan(&txout.PkScript, &txout.Value); err != nil {
+		return txout, errors.Wrapf(err, "Storage: Cannot query: %v", err)
 	}
-	return PkScript, nil
+	return txout, nil
 }
 
 // GetAddressByHash looks for an address by hash
