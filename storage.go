@@ -4,10 +4,9 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx"
-	"github.com/vladyslav2/bitcoin2sql/pkg/transaction"
-
 	"github.com/pkg/errors"
-	"github.com/vladyslav2/bitcoin2sql/pkg/address"
+	"github.com/webdeveloppro/cryptopiggy/pkg/address"
+	"github.com/webdeveloppro/cryptopiggy/pkg/transaction"
 )
 
 // Storage general interface

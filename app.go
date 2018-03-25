@@ -5,8 +5,8 @@ import (
 	"log"
 
 	"github.com/jackc/pgx"
-	"github.com/vladyslav2/bitcoin2sql/pkg/address"
-	"github.com/vladyslav2/bitcoin2sql/pkg/block"
+	"github.com/webdeveloppro/cryptopiggy/pkg/address"
+	"github.com/webdeveloppro/cryptopiggy/pkg/block"
 
 	"github.com/btcsuite/btcd/blockchain"
 )

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/vladyslav2/bitcoin2sql/pkg/block"
-	"github.com/vladyslav2/bitcoin2sql/pkg/transaction"
+	"github.com/webdeveloppro/cryptopiggy/pkg/block"
+	"github.com/webdeveloppro/cryptopiggy/pkg/transaction"
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
