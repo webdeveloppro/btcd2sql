@@ -33,7 +33,7 @@ func (pg *PGStorage) GetTxOutByIndex(hash string, index uint32) (*transaction.Tx
 
 	txout := &transaction.TxOut{}
 	sql := fmt.Sprintf(`SELECT 
-		txout::json#>>'{%d,pk_script}', txout::json#>>'{%d,val}' FROM transaction 
+		txout::jsonb#>>'{%d,pk_script}', cast(txout::jsonb#>>'{%d,val}' as bigint) FROM transaction 
 		WHERE hash = $1`, index, index)
 
 	if err := pg.con.QueryRow(sql, hash).Scan(&txout.PkScript, &txout.Value); err != nil {

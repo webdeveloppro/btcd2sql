@@ -15,7 +15,7 @@ import (
 var AddrStorage map[string]*address.Address
 
 // Parse will transfer leveldb blockchain data to SQL
-func Parse(bc *blockchain.BlockChain, pg *pgx.ConnPool) {
+func Parse(bc *blockchain.BlockChain, pg *pgx.ConnPool, startBlock int32) {
 
 	rows, err := pg.Query("SELECT id, hash, ballance, income, outcome from address")
 	if err != nil {
@@ -45,7 +45,7 @@ func Parse(bc *blockchain.BlockChain, pg *pgx.ConnPool) {
 
 	// beststate := BC2SQL.Blockchain.BestSnapshot()
 	var n int32
-	for n = 0; n < b.Height; n++ {
+	for n = startBlock; n < b.Height; n++ {
 		blk, err := bc.BlockByHeight(n)
 
 		if err != nil {

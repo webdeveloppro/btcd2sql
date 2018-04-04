@@ -3,10 +3,11 @@ package main
 import (
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/jackc/pgx"
-	"github.com/vladyslav2/db2sql"
+	"github.com/webdeveloppro/btcd2sql"
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/database"
@@ -19,10 +20,12 @@ import (
 var chainParams = &chaincfg.MainNetParams
 
 func main() {
+	var startBlock int32
 	host := os.Getenv("DB_HOST")
 	user := os.Getenv("DB_USERNAME")
 	dbpassword := os.Getenv("DB_PASSWORD")
 	dbname := os.Getenv("DB_NAME")
+	start := os.Getenv("START_BLOCK")
 
 	if host == "" {
 		log.Print("Empty host string, setup DB_HOST env")
@@ -37,6 +40,16 @@ func main() {
 	if dbname == "" {
 		log.Fatal("Empty dbname string, setup DB_DBNAME env")
 		return
+	}
+
+	if start == "" {
+		startBlock = 0
+	} else {
+		i, err := strconv.ParseInt(start, 10, 32)
+		if err != nil {
+			log.Fatalf("Cannot parse %s to int", start)
+		}
+		startBlock = int32(i)
 	}
 
 	connPoolConfig := pgx.ConnPoolConfig{
@@ -74,5 +87,5 @@ func main() {
 		log.Fatalf("cannot create blockchain %v", err)
 	}
 
-	db2sql.Parse(bc, pg)
+	db2sql.Parse(bc, pg, startBlock)
 }

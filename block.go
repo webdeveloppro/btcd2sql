@@ -1,10 +1,11 @@
 package db2sql
 
 import (
-	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"strings"
+
+	"github.com/jackc/pgx"
 
 	"github.com/webdeveloppro/cryptopiggy/pkg/block"
 	"github.com/webdeveloppro/cryptopiggy/pkg/transaction"
@@ -66,9 +67,9 @@ func (blk *Block2SQL) ConvertTransactions(transactions []*btcutil.Tx) ([]string,
 
 		// Gather all TxIn Information
 		for _, txIn := range ins {
-			txInStruct, err := blk.txin2struct(txIn)
+			txInStruct, err := blk.Txin2Struct(txIn)
 			if err != nil {
-				return nil, err
+				return nil, errors.Wrapf(err, "Cannot convert trans: %s, %+v", t.Hash, txIn)
 			}
 			if txInStruct != nil {
 				t.TxIns = append(t.TxIns, *txInStruct)
@@ -105,7 +106,7 @@ func (blk *Block2SQL) ConvertTransactions(transactions []*btcutil.Tx) ([]string,
 	return addressesHash, nil
 }
 
-func (blk *Block2SQL) txin2struct(txIn *wire.TxIn) (*transaction.TxIn, error) {
+func (blk *Block2SQL) Txin2Struct(txIn *wire.TxIn) (*transaction.TxIn, error) {
 
 	// Get previous address hash if that exists
 	if txIn.PreviousOutPoint.Hash.String() != "0000000000000000000000000000000000000000000000000000000000000000" {
@@ -115,7 +116,23 @@ func (blk *Block2SQL) txin2struct(txIn *wire.TxIn) (*transaction.TxIn, error) {
 
 		disbuf, err := txscript.DisasmString(txIn.SignatureScript)
 		if err != nil {
-			return txStruct, errors.Wrap(err, "txin2json: Cannot get txin address")
+			return txStruct, errors.Wrapf(err, "txin2struct: Cannot get txin address: %x", txIn.SignatureScript)
+		}
+
+		txStruct.SignatureScript = disbuf
+		disbufArr := strings.Split(disbuf, " ")
+		if len(disbufArr) > 1 {
+			addressHash, err = GetInputAddress(disbufArr[1])
+			if err != nil {
+				// non-standard transaction like in
+				// 3ee060fb1856f111859fb108d079635a2d225ef68d5ae5250ce70d39ac2a2dc4
+				badaddress := string(txIn.SignatureScript)
+				if len(badaddress) > 22 {
+					badaddress = badaddress[0:22]
+				}
+				addressHash = fmt.Sprintf("nonstandard-%s", badaddress)
+				// return txStruct, errors.Wrapf(err, "txin2struct: Cannot get txin address, Disbuf: %s", disbuf)
+			}
 		}
 
 		// maybe we can get value without looking for prev output?
@@ -125,7 +142,7 @@ func (blk *Block2SQL) txin2struct(txIn *wire.TxIn) (*transaction.TxIn, error) {
 			// dirty hack for weired transactions
 			// like 9969603dca74d14d29d1d5f56b94c7872551607f8c2d6837ab9715c60721b50e
 
-			if err == sql.ErrNoRows {
+			if err == pgx.ErrNoRows {
 				badaddress := disbuf
 				if len(badaddress) > 22 {
 					badaddress = badaddress[0:22]
@@ -134,18 +151,12 @@ func (blk *Block2SQL) txin2struct(txIn *wire.TxIn) (*transaction.TxIn, error) {
 				txout.Addresses[0] = fmt.Sprintf("nonstandard-%s", badaddress)
 				addressHash = txout.Addresses[0]
 			} else {
-				return txStruct, errors.Wrap(err, "txin2struct: Cannot find previous hash")
+				return txStruct, errors.Wrapf(err, "txin2struct: Cannot find previous transaction: %s", txIn.PreviousOutPoint.Hash.String())
 			}
-		}
-
-		disbufArr := strings.Split(disbuf, " ")
-		txStruct.SignatureScript = disbuf
-
-		if len(disbufArr) > 1 {
-			addressHash, err = GetInputAddress(disbufArr[1])
-			if err != nil {
-				return txStruct, errors.Wrap(err, "txin2json: Cannot get txin address")
-			}
+		} else {
+			// ToDo
+			// always 0 ?
+			addressHash = txout.Addresses[0]
 		}
 
 		if err := blk.checkAddressHash(addressHash); err != nil {
@@ -154,7 +165,7 @@ func (blk *Block2SQL) txin2struct(txIn *wire.TxIn) (*transaction.TxIn, error) {
 
 		txStruct.Address = addressHash
 		txStruct.AddressID = AddrStorage[addressHash].ID
-		txStruct.Amount = AddrStorage[addressHash].Ballance
+		txStruct.Amount = txout.Value
 		txStruct.PrevOut = txIn.PreviousOutPoint.Hash.String()
 		txStruct.SignatureScript = disbuf
 		txStruct.Sequence = txIn.Sequence
@@ -166,9 +177,9 @@ func (blk *Block2SQL) txin2struct(txIn *wire.TxIn) (*transaction.TxIn, error) {
 		// ToDo
 		// Thats not right - you can send half of your money
 		// have to get value from transaction
-		AddrStorage[addressHash].Income -= AddrStorage[addressHash].Ballance
-		AddrStorage[addressHash].Outcome += AddrStorage[addressHash].Ballance
-		AddrStorage[addressHash].Ballance = 0
+		// AddrStorage[addressHash].Income -= AddrStorage[addressHash].Ballance
+		// AddrStorage[addressHash].Outcome += AddrStorage[addressHash].Ballance
+		AddrStorage[addressHash].Ballance -= txout.Value
 
 		return txStruct, nil
 	}
@@ -179,7 +190,7 @@ func (blk *Block2SQL) txin2struct(txIn *wire.TxIn) (*transaction.TxIn, error) {
 func (blk *Block2SQL) FindPrevTxOut(hash string, index uint32) (*transaction.TxOut, error) {
 
 	// ToDo
-	// Addresses[0] - seems like a wrong assumption
+	// always Addresses[0] - seems like a wrong assumption
 
 	// Check if transaction is in current block
 	for _, t := range blk.Block.Transactions {
@@ -195,7 +206,7 @@ func (blk *Block2SQL) FindPrevTxOut(hash string, index uint32) (*transaction.TxO
 
 	dst := make([]byte, hex.DecodedLen(len(txout.PkScript)))
 	if _, err := hex.Decode(dst, []byte(txout.PkScript)); err != nil {
-		return txout, errors.Wrap(err, "Utils: Cannot convert hex string to bytes")
+		return txout, errors.Wrapf(err, "Utils: Cannot convert hex string to bytes, tran: %s index: %d, pkscript: %s", hash, index, txout.PkScript)
 	}
 
 	typ, addresses, _, err := txscript.ExtractPkScriptAddrs(dst, &chaincfg.MainNetParams)
@@ -232,7 +243,7 @@ func (blk *Block2SQL) txout2struct(txOut *wire.TxOut) (*transaction.TxOut, error
 
 	_, err := txStruct.GetAddresses()
 	if err != nil {
-		return txStruct, errors.Wrapf(err, "block: cannot convert txout to struct")
+		return txStruct, errors.Wrapf(err, "block: cannot get addresses from txStruct")
 	}
 
 	for _, addressHash := range txStruct.Addresses {
@@ -250,11 +261,13 @@ func (blk *Block2SQL) txout2struct(txOut *wire.TxOut) (*transaction.TxOut, error
 	return txStruct, nil
 }
 
+// ToDo
+// pass hole address structure - to save right initial ballance
 func (blk *Block2SQL) checkAddressHash(hash string) error {
 	if _, ok := AddrStorage[hash]; ok == false {
 		addr, err := blk.storage.GetAddressByHash(hash)
 		switch err {
-		case sql.ErrNoRows:
+		case pgx.ErrNoRows:
 			if er := addr.Save(); er != nil {
 				return errors.Wrap(err, fmt.Sprintf("checkaddress: cant create new address %s", hash))
 			}
